@@ -19,9 +19,10 @@ const DEFAULT_CONFIG = {
   videos_per_day: 1,
   privacy: "private",
   claude_model: "claude-opus-5-5",
-  tts_voice: "hi-IN-MadhurNeural",
-  monthly_budget_usd: 10,
-  use_test_video: true,
+  tts_voice: "en-US-JennyNeural",
+  monthly_budget_usd: 40,
+  use_test_video: false,
+  qa_review: true,
   idea_expiry_days: 7,
 };
 
@@ -43,12 +44,17 @@ const VIZ = {
   choropleth_timeline: "Karttanimaatio",
   bar_chart_race: "Pylväskisa",
   line_race: "Viivakisa",
+  how_it_works: "Näin se toimii",
 };
 const REGION = {
-  world: "Maailma",
+  world: "Koko maailma",
+  country: "Yksi maa",
   asia: "Aasia",
+  europe: "Eurooppa",
+  africa: "Afrikka",
   south_asia: "Etelä-Aasia",
-  india_vs_peers: "Intia vs. vertailumaat",
+  peers: "Vertailumaat",
+  india_vs_peers: "Vertailumaat",
 };
 const COMMANDS = {
   daily: "Päivän ajo (koko putki)",
@@ -211,11 +217,11 @@ function Overview({ items, config, runs, cron, actions, openItem }) {
       <div class="card">
         <h3>Automaatio</h3>
         <p><span class="badge tone-${mode.tone}">${mode.text}</span></p>
-        <p class="muted">Seuraava ajastettu ajo: <b>${next ? `${fmt(next.toISOString())} (Intia ${zoneTime(next, "Asia/Kolkata")})` : "–"}</b></p>
+        <p class="muted">Seuraava ajastettu ajo: <b>${next ? `${fmt(next.toISOString())} (US ${zoneTime(next, "America/New_York")})` : "–"}</b></p>
         <p class="muted">Viimeisin ajo: ${lastRun ? html`<a href=${lastRun.html_url} target="_blank">${lastRun.display_title}</a> · ${runStatus(lastRun)} · ${relative(lastRun.created_at)}` : "–"}</p>
         <div class="stack">
           <${Toggle} checked=${!config.paused} onChange=${(v) => actions.saveConfig({ paused: !v })} label="Automaatio päällä" hint="Pois päältä = ajastettu ajo ei tee mitään" />
-          <${Toggle} checked=${config.autopilot} onChange=${(v) => actions.saveConfig({ autopilot: v })} label="Autopilotti" hint="Paras idea hyväksytään tuotantoon automaattisesti" />
+          <${Toggle} checked=${config.autopilot} onChange=${(v) => actions.saveConfig({ autopilot: v })} label="Autopilotti" hint="Hyväksyy parhaan idean. Oppii vasta, kun sama aihe on toiminut vähintään kolmessa videossa kahden viikon ja neljän kuukauden välillä." />
           <${Toggle} checked=${config.auto_publish} onChange=${(v) => actions.saveConfig({ auto_publish: v })} label="Automaattinen julkaisu" hint="Valmis video julkaistaan ilman tarkistusta" />
         </div>
         <div class="row">
@@ -446,8 +452,8 @@ function Suggest({ actions }) {
   return html`<div class="page narrow">
     <form class="card form" onSubmit=${submit}>
       <h3>Ehdota omaa aihetta</h3>
-      <p class="muted">Kirjoita aihe vapaasti. Tekoäly muuttaa sen ideaksi, valitsee sopivan World Bank -datan ja visualisoinnin.</p>
-      <label>Aihe<textarea rows="4" value=${text} onInput=${(e) => setText(e.target.value)} placeholder="Esim. Intian väkiluku vs Kiina 1960–2023, tai kuinka monella intialaisella on sähkö"></textarea></label>
+      <p class="muted">Kirjoita aihe vapaasti. Tekoäly tekee siitä joko koko maailman tai yhden maan videon ja valitsee World Bank -datan.</p>
+      <label>Aihe<textarea rows="4" value=${text} onInput=${(e) => setText(e.target.value)} placeholder="Esim. Nigerian sähkö tämän päivän uutisissa, tai maailman internet-yhteydet"></textarea></label>
       <${Toggle} checked=${approve} onChange=${setApprove} label="Hyväksy suoraan tuotantoon" hint="Muuten idea jää Ideat-sarakkeeseen hyväksyttäväksi" />
       <${Toggle} checked=${processNow} onChange=${setProcessNow} label="Käsittele heti" hint="Käynnistää ajon nyt, muuten seuraavassa päivän ajossa" />
       <button class="btn primary" disabled=${busy}>${busy ? "Lähetetään…" : "Lähetä ehdotus"}</button>
@@ -530,8 +536,9 @@ function Research({ research, actions }) {
     <p class="muted">Viimeisin tutkimus: <b>${research.date}</b>
       <button class="btn small" onClick=${() => actions.dispatch("research")}>Päivitä nyt</button></p>
     <div class="grid-3">
-      ${section("Uutisotsikot (Intia)", research.news_headlines)}
-      ${section("YouTube-trendit Intiassa", research.youtube_trending_india)}
+      ${section("Maailman uutiset", research.news_headlines)}
+      ${section("Tämän hetken tapahtumat", research.current_events)}
+      ${section("YouTube-trendit", research.youtube_trending || research.youtube_trending_india)}
       ${section("Tänä päivänä historiassa", research.on_this_day)}
     </div>
   </div>`;
@@ -545,7 +552,11 @@ function Settings({ gh, config, actions, onCronChange }) {
   const [time, setTime] = useState("");
   const [scheduleError, setScheduleError] = useState("");
 
-  useEffect(() => setForm(config), [config]);
+  useEffect(() => {
+    const next = { ...config };
+    if (!String(next.tts_voice || "").startsWith("en-US-")) next.tts_voice = "en-US-JennyNeural";
+    setForm(next);
+  }, [config]);
   useEffect(() => {
     gh.readText(WORKFLOW_PATH).then((wf) => {
       setWorkflow(wf);
@@ -584,16 +595,17 @@ function Settings({ gh, config, actions, onCronChange }) {
     const [hh, mm] = time.split(":").map(Number);
     const d = new Date();
     d.setUTCHours(hh, mm, 0, 0);
-    return `Suomi ${zoneTime(d, "Europe/Helsinki")} · Intia ${zoneTime(d, "Asia/Kolkata")}`;
+    return `Suomi ${zoneTime(d, "Europe/Helsinki")} · US ${zoneTime(d, "America/New_York")}`;
   })();
 
   return html`<div class="page grid-2">
     <div class="card form">
       <h3>Automaatio</h3>
       <${Toggle} checked=${!form.paused} onChange=${(v) => setForm({ ...form, paused: !v })} label="Automaatio päällä" />
-      <${Toggle} checked=${form.autopilot} onChange=${(v) => setForm({ ...form, autopilot: v })} label="Autopilotti" hint="Hyväksyy parhaan idean tuotantoon automaattisesti" />
+      <${Toggle} checked=${form.autopilot} onChange=${(v) => setForm({ ...form, autopilot: v })} label="Autopilotti" hint="Hyväksyy parhaan idean ja kallistaa uusia aiheita hieman siihen suuntaan, joka on toiminut useassa vanhassa videossa. Yksi hitti ei riitä." />
       <${Toggle} checked=${form.auto_publish} onChange=${(v) => setForm({ ...form, auto_publish: v })} label="Automaattinen julkaisu" hint="Julkaisee valmiit videot ilman tarkistusta" />
-      <${Toggle} checked=${form.use_test_video} onChange=${(v) => setForm({ ...form, use_test_video: v })} label="Testivideo" hint="Tuottaa testikuvan oikean videon sijaan (kunnes tuotantovaihe on valmis)" />
+      <${Toggle} checked=${form.use_test_video} onChange=${(v) => setForm({ ...form, use_test_video: v })} label="Testivideo" hint="Tuottaa 10 s testikuvan oikean videon sijaan (ei Claude-kuluja)" />
+      <${Toggle} checked=${form.qa_review} onChange=${(v) => setForm({ ...form, qa_review: v })} label="Laaduntarkistus" hint="Claude katsoo avainkuvat ja korjaa ongelmat ennen renderöintiä (lisäkulu)" />
       <label>Ideoita per ajo<input type="number" min="1" max="12" value=${form.ideas_per_run} onInput=${set("ideas_per_run", Number)} /></label>
       <label>Videoita päivässä<input type="number" min="0" max="5" value=${form.videos_per_day} onInput=${set("videos_per_day", Number)} /></label>
       <label>Vanhat ideat arkistoidaan (päivää)<input type="number" min="1" max="60" value=${form.idea_expiry_days} onInput=${set("idea_expiry_days", Number)} /></label>
@@ -611,10 +623,13 @@ function Settings({ gh, config, actions, onCronChange }) {
           ${["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"].map((m) => html`<option value=${m}>${m}</option>`)}
         </select>
       </label>
-      <label>Hindi-ääni
+      <label>Puheääni (amerikanenglanti)
         <select value=${form.tts_voice} onChange=${set("tts_voice")}>
-          <option value="hi-IN-MadhurNeural">Madhur (mies)</option>
-          <option value="hi-IN-SwaraNeural">Swara (nainen)</option>
+          <option value="en-US-JennyNeural">Jenny, innostunut (nainen)</option>
+          <option value="en-US-AriaNeural">Aria, innostunut (nainen)</option>
+          <option value="en-US-AvaNeural">Ava, innostunut (nainen)</option>
+          <option value="en-US-GuyNeural">Guy, innostunut (mies)</option>
+          <option value="en-US-ChristopherNeural">Christopher, innostunut (mies)</option>
         </select>
       </label>
       <label>Kuukausibudjetti (USD)<input type="number" min="0" step="1" value=${form.monthly_budget_usd} onInput=${set("monthly_budget_usd", Number)} />
@@ -631,7 +646,7 @@ function Settings({ gh, config, actions, onCronChange }) {
       <p class="muted">${preview}</p>
       ${scheduleError && html`<div class="alert error">${scheduleError}</div>`}
       <button class="btn primary" onClick=${saveSchedule} disabled=${!time}>Tallenna aikataulu</button>
-      <p class="muted small">Intian iltahuippu on noin klo 18–21 IST (12:30–15:30 UTC).</p>
+      <p class="muted small">Yhdysvaltojen iltahuippu on noin klo 19–22 ET (00:00–03:00 UTC talviaikaan).</p>
     </div>
   </div>`;
 }
