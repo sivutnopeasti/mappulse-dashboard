@@ -18,7 +18,7 @@ const DEFAULT_CONFIG = {
   ideas_per_run: 6,
   videos_per_day: 1,
   privacy: "private",
-  claude_model: "claude-sonnet-5-5",
+  claude_model: "claude-opus-5-5",
   tts_voice: "hi-IN-MadhurNeural",
   monthly_budget_usd: 10,
   use_test_video: true,
@@ -608,7 +608,7 @@ function Settings({ gh, config, actions, onCronChange }) {
       </label>
       <label>Claude-malli
         <select value=${form.claude_model} onChange=${set("claude_model")}>
-          ${["claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5"].map((m) => html`<option value=${m}>${m}</option>`)}
+          ${["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"].map((m) => html`<option value=${m}>${m}</option>`)}
         </select>
       </label>
       <label>Hindi-ääni
