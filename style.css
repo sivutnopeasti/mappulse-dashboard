@@ -152,6 +152,8 @@ textarea.code { width: 100%; font-family: Consolas, monospace; font-size: 13px; 
 .login-card h1 { margin: 0; font-size: 24px; }
 .login-card h1 span { color: var(--muted); font-weight: 400; }
 .login-card details { font-size: 13px; color: var(--muted); }
+.login-card .remember { flex-direction: row; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.login-card .remember input { width: auto; }
 .login-card ol { padding-left: 18px; line-height: 1.6; }
 
 @media (max-width: 860px) {

@@ -112,9 +112,36 @@ function Toggle({ checked, onChange, label, hint }) {
 
 /* ---------- Login ---------- */
 
+const TOKEN_KEY = "mp_token";
+const fromB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+
+async function unlockToken(password) {
+  const res = await fetch(`vault.json?t=${Date.now()}`, { cache: "no-store" });
+  if (!res.ok) throw new Error("Salattua tokenia ei löytynyt. Aja dashboard-repon Deploy dashboard -työnkulku.");
+  const vault = await res.json();
+  const baseKey = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveKey"]);
+  const key = await crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: fromB64(vault.salt), iterations: vault.iterations, hash: "SHA-256" },
+    baseKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["decrypt"],
+  );
+  try {
+    const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromB64(vault.iv) }, key, fromB64(vault.ciphertext));
+    return new TextDecoder().decode(plain);
+  } catch {
+    throw new Error("Väärä salasana.");
+  }
+}
+
+function storedToken() {
+  return sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY);
+}
+
 function Login({ onLogin }) {
-  const [token, setToken] = useState("");
-  const [repo, setRepo] = useState(DEFAULT_REPO);
+  const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -123,13 +150,13 @@ function Login({ onLogin }) {
     setBusy(true);
     setError("");
     try {
-      const gh = new GitHub(token.trim(), repo.trim());
+      const token = await unlockToken(password);
+      const gh = new GitHub(token, DEFAULT_REPO);
       await gh.repoInfo();
-      localStorage.setItem("mp_token", token.trim());
-      localStorage.setItem("mp_repo", repo.trim());
+      (remember ? localStorage : sessionStorage).setItem(TOKEN_KEY, token);
       onLogin(gh);
     } catch (err) {
-      setError(`Kirjautuminen epäonnistui (${err.status || ""} ${err.message}). Tarkista token ja sen oikeudet.`);
+      setError(err.status ? `GitHub hylkäsi tokenin (${err.status} ${err.message}). Tarkista PAT_TOKEN-salaisuus.` : err.message);
     } finally {
       setBusy(false);
     }
@@ -138,20 +165,10 @@ function Login({ onLogin }) {
   return html`<div class="login">
     <form class="card login-card" onSubmit=${submit}>
       <h1>MapPulse <span>ohjauspaneeli</span></h1>
-      <p>Kirjaudu GitHub-tokenilla. Token tallentuu vain tähän selaimeen.</p>
-      <label>GitHub-token<input type="password" value=${token} onInput=${(e) => setToken(e.target.value)} placeholder="github_pat_..." required /></label>
-      <label>Repo<input value=${repo} onInput=${(e) => setRepo(e.target.value)} /></label>
+      <label>Salasana<input type="password" value=${password} onInput=${(e) => setPassword(e.target.value)} autocomplete="current-password" autofocus required /></label>
+      <label class="remember"><input type="checkbox" checked=${remember} onChange=${(e) => setRemember(e.target.checked)} /> Muista minut tällä laitteella</label>
       ${error && html`<div class="alert error">${error}</div>`}
-      <button class="btn primary" disabled=${busy}>${busy ? "Tarkistetaan..." : "Kirjaudu"}</button>
-      <details>
-        <summary>Miten teen tokenin?</summary>
-        <ol>
-          <li>Avaa <a href="https://github.com/settings/personal-access-tokens/new" target="_blank">github.com/settings/personal-access-tokens/new</a></li>
-          <li>Repository access: <b>Only select repositories</b> → <code>youtube-shorts-bot</code></li>
-          <li>Permissions → Repository: <b>Contents</b>, <b>Actions</b> ja <b>Workflows</b> = Read and write</li>
-          <li>Generate token ja liitä se yllä olevaan kenttään.</li>
-        </ol>
-      </details>
+      <button class="btn primary" disabled=${busy}>${busy ? "Avataan..." : "Kirjaudu"}</button>
     </form>
   </div>`;
 }
@@ -712,6 +729,7 @@ function Dashboard({ gh, onLogout }) {
       setRuns(rs);
       setLoadError("");
     } catch (err) {
+      if (err.status === 401) return onLogout();
       setLoadError(err.message);
     } finally {
       setLoading(false);
@@ -734,6 +752,7 @@ function Dashboard({ gh, onLogout }) {
     try {
       return await fn(...args);
     } catch (err) {
+      if (err.status === 401) return onLogout();
       toast(`Virhe: ${err.message}`, "error");
       throw err;
     }
@@ -848,11 +867,13 @@ function Dashboard({ gh, onLogout }) {
 
 function App() {
   const [gh, setGh] = useState(() => {
-    const token = localStorage.getItem("mp_token");
-    return token ? new GitHub(token, localStorage.getItem("mp_repo") || DEFAULT_REPO) : null;
+    const token = storedToken();
+    return token ? new GitHub(token, DEFAULT_REPO) : null;
   });
   const logout = () => {
-    localStorage.removeItem("mp_token");
+    sessionStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem("mp_repo");
     setGh(null);
   };
   return gh ? html`<${Dashboard} gh=${gh} onLogout=${logout} />` : html`<${Login} onLogin=${setGh} />`;
