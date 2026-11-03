@@ -17,6 +17,13 @@ export function decodeBase64(b64) {
   return new TextDecoder().decode(Uint8Array.from(binary, (c) => c.charCodeAt(0)));
 }
 
+function missingPermission(path, method) {
+  const access = method === "GET" ? "Read" : "Read and write";
+  if (path.includes("/actions/")) return `Actions (${access})`;
+  if (path.includes(".github/workflows")) return "Workflows (Read and write)";
+  return `Contents (${access})`;
+}
+
 export class GitHubError extends Error {
   constructor(status, message) {
     super(message);
@@ -48,6 +55,10 @@ export class GitHub {
       try {
         message = (await res.json()).message || message;
       } catch {}
+      if (res.status === 403 && /not accessible/i.test(message)) {
+        message = `Tokenilta puuttuu oikeus: ${missingPermission(path, method)}. ` +
+          "Lisää se GitHubissa: Settings → Developer settings → Fine-grained tokens → token → Edit.";
+      }
       throw new GitHubError(res.status, message);
     }
     if (raw) return res;
